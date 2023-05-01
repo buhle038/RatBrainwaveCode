@@ -1,0 +1,32 @@
+---
+title: "Formulas"
+author: "Lukas"
+date: "2023-04-02"
+output: html_document
+---
+
+1. Bipolar Referencing
+
+$Bipolar Referenced Channel =  X_{Channel} - X_{Reference}$
+
+2. Coherence
+
+$Coherence_{xy} = \frac{|C_{xy}|}{P_{x}P_{y}}$
+
+3. Probit formula
+
+$probit(\pi) = \Phi^{-1}(\pi), \ \ 0 \leq\pi\leq1$
+
+4. ARIMA Formula
+
+$\hat{y_t} \text{ or } \hat{(y_t-y_{t-d})} = \mu + \displaystyle\sum_{i=1}^{p}\phi_iy_{t-i}+\displaystyle\sum_{j=1}^{q}\theta_je_{t-j}+e_t$
+
+5. Variance in OLS vs GLS
+
+\begin{align*} 
+OLS: V(y) = \sigma^2I  \\
+GLS: V(y) = \sigma^2\Omega \\
+\end{align*} 
+
+
+

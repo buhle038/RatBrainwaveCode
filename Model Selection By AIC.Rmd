@@ -1,0 +1,255 @@
+---
+title: "Model Selection By AIC"
+author: "Lukas"
+date: "2023-03-28"
+output: html_document
+---
+
+```{r}
+library(nlme)
+library(lme4)
+library(VGAM)
+library(car)
+library(tseries)
+library(forecast)
+library(TSA)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(vars)
+library(astsa)
+```
+
+
+Load MATLAB Data
+```{r}
+Aug_08 <- read.csv("C:\\Users\\buhl5\\Desktop\\Plan B Files\\PMA17\\Aug_08_table.csv")
+Aug_09 <- read.csv("C:\\Users\\buhl5\\Desktop\\Plan B Files\\PMA17\\Aug_09_table.csv")
+Aug_12 <- read.csv("C:\\Users\\buhl5\\Desktop\\Plan B Files\\PMA17\\Aug_12_table.csv")
+Aug_15 <- read.csv("C:\\Users\\buhl5\\Desktop\\Plan B Files\\PMA17\\Aug_15_table.csv")
+Oct_12 <- read.csv("C:\\Users\\buhl5\\Desktop\\Plan B Files\\PMA17\\Oct_12_table.csv")
+```
+
+Remove Bad Tones from August 8th
+
+```{r}
+Aug_08 <- Aug_08[-c(1:60),]
+```
+
+Relabel Days
+```{r}
+Aug_08$Day <- 1
+Aug_09$Day <- 2
+Aug_12$Day <- 3
+Aug_15$Day <- 4
+Oct_12$Day <- 5
+```
+
+
+
+Day will likely be more useful when the days are all ran together with no gaps
+
+Full Ephys Dataset
+```{r}
+Data <- rbind(Aug_08,Aug_09,Aug_12,Aug_15)
+Test_Data <- Oct_12
+rm(Aug_08,Aug_09,Aug_12,Aug_15,Oct_12)
+```
+
+
+Factors
+```{r}
+Data$Day <- as.factor(Data$Day)
+Data$Tone <- as.factor(Data$Tone)
+Data$Bin <- as.factor(Data$Bin)
+```
+
+
+Load Behavior Data
+```{r}
+## I Need to run August 5th through Analysis
+Aug_08_Behav <- read.csv("C:\\Users\\buhl5\\Downloads\\08_08_new_R_TB_PMA17.csv")
+Aug_09_Behav <- read.csv("C:\\Users\\buhl5\\Downloads\\08_09_new_R_TB_PMA17.csv")
+Aug_12_Behav <- read.csv("C:\\Users\\buhl5\\Downloads\\08_12_new_R_TB_PMA17.csv")
+Aug_15_Behav <- read.csv("C:\\Users\\buhl5\\Downloads\\08_15_new_R_TB_PMA17.csv")
+Oct_12_Behav <- read.csv("C:\\Users\\buhl5\\Downloads\\10_12_new_R_TB_PMA17.csv")
+```
+
+Pull Time Specific Bins currently time 0 to 29. Will likely be adjusted to only tones
+
+```{r}
+Aug_08_Behav_p  <-  Aug_08_Behav[Aug_08_Behav[,2] %in% c(0:29),3]
+Aug_09_Behav_p  <-  Aug_09_Behav[Aug_09_Behav[,2] %in% c(0:29),3]
+Aug_12_Behav_p  <-  Aug_12_Behav[Aug_12_Behav[,2] %in% c(0:29),3]
+Aug_15_Behav_p  <-  Aug_15_Behav[Aug_15_Behav[,2] %in% c(0:29),3]
+Oct_12_Behav_p  <-  Oct_12_Behav[Oct_12_Behav[,2] %in% c(0:29),3]
+```
+
+All Behave
+
+```{r}
+#Remove same August Stuff
+Aug_08_Behav_p <- Aug_08_Behav_p[-c(1:60)]
+Behave <- c(Aug_08_Behav_p,Aug_09_Behav_p,Aug_12_Behav_p,Aug_15_Behav_p)
+
+Test_Data$Platform <- Oct_12_Behav_p
+Data$Platform <- Behave
+```
+
+
+Clean
+```{r}
+rm(Aug_08_Behav,Aug_09_Behav,Aug_12_Behav,Aug_15_Behav,Oct_12_Behav)
+rm(Aug_08_Behav_p,Aug_09_Behav_p,Aug_12_Behav_p,Aug_15_Behav_p,Oct_12_Behav_p,Behave)
+```
+
+Data needs to be adjusted to accommodate 0 and 1
+
+```{r}
+#Playing it safe using a loop
+
+offset <- 0.02
+
+
+for(i in 1:length(Data$Platform)){
+  
+  if(Data$Platform[i] == 0){Data$Platform[i] <- offset}
+  if(Data$Platform[i] == 1){Data$Platform[i] <- 1 - offset}
+}
+
+for(i in 1:length(Test_Data$Platform)){
+  
+  if(Test_Data$Platform[i] == 0){Test_Data$Platform[i] <- offset}
+  if(Test_Data$Platform[i] == 1){Test_Data$Platform[i] <- 1 - offset}
+}
+```
+
+Transform Response to make it fit regression requirement
+```{r}
+Data$probitPlatform <- probitlink(Data$Platform)
+Test_Data$probitPlatform <- probitlink(Test_Data$Platform)
+Test_Data.gls <- Test_Data
+```
+
+```{r}
+Datats <- ts(Data$probitPlatform,frequency = 30,start = c(1,1))
+model_var <-  ts(Data[,c(4:39)],frequency = 30,start = c(1,1))
+Test_Data <- ts(Test_Data[,c(4:39,113)])
+```
+
+```{r}
+start_model_means <- arimax(Datats,order=c(1,0,2),
+                 seasonal=list(order=c(2,0,0),period=30))#,xreg=model_var[,18])
+```
+
+
+GLS
+```{r}
+gls.data <- Data[,c(1:39,113)]
+gls.data$Day <- as.factor(gls.data$Day)
+gls.data$Tone <- as.factor(gls.data$Tone)
+gls.data$Bin <- as.factor(gls.data$Bin)
+nesting.info <- groupedData(probitPlatform~1|Day/Tone/Bin,data=gls.data)
+
+test.fit.gls <- gls(probitPlatform~Day+Tone+Bin,data=nesting.info,correlation = corARMA(,form=~1|Day/Tone,p=1,q=1),method = "ML")
+```
+
+
+Stepwise Longitudinal Model
+
+
+```{r}
+test_candidate_model_gls <- function(gls.var.available,i){
+  candidate_model <- nlme::gls(as.formula(paste("probitPlatform~",paste(c(model_var_gls,gls.var.available[i]),collapse="+"))),data=nesting.info,correlation = nlme::corARMA(,form=~1|Day/Tone,p=1,q=1),method = "ML")
+   
+   test_aic <- extractAIC(candidate_model)[2]
+   return(test_aic)
+}
+```
+
+
+
+
+```{r}
+model_var_gls <- c("Day","Tone","Bin")
+gls.var <- names(nesting.info)[-c(1:3,40)]
+gls.var.available <- gls.var
+
+best_aic_gls <- extractAIC(test.fit.gls)[2]
+
+check <-  F
+
+cl <- parallel::makeCluster(14)
+doParallel::registerDoParallel(cl)
+
+
+while(check == F){
+  
+  candidates <- foreach::foreach(i = 1:length(gls.var.available), .combine = cbind) %dopar% {
+    test_candidate_model_gls(gls.var.available = gls.var.available, i=i)
+  }
+  
+  if(min(candidates) >= best_aic_gls){check = T}  
+  
+  if(min(candidates) < best_aic_gls & check == F){
+    best_aic_gls <- min(candidates)
+    model_var_gls <- c(model_var_gls,gls.var.available[sort(candidates,index.return=T)$ix[1]])
+    gls.var.available <- gls.var.available[-sort(candidates,index.return=T)$ix[1]]
+    }  
+  print("Iteration")
+}
+
+parallel::stopCluster(cl)
+model_var_gls
+
+```
+
+Final Model by AIC
+```{r}
+AIC_mod.gls <- gls(as.formula(paste("probitPlatform~",paste(model_var_gls,collapse="+"))),data=nesting.info,correlation = nlme::corARMA(c(0.7762,0.0972),form=~1|Day/Tone,p=1,q=1),method = "ML")
+
+AIC_mod.gls.DayPoly <- gls(probitPlatform ~ poly(Day,2) +Tone + Bin + ILBLA_mean_High_Beta + PLBLA_mean_High_Beta + 
+    IL_pow_mean_Low_Beta + BLA_pow_mean_Alpha + ILPL_mean_High_Beta + 
+    ILBLA_mean_Mid_Beta + BLA_pow_mean_Mid_Beta + PL_pow_mean_High_Beta + 
+    PL_pow_mean_Low_Beta + PL_pow_mean_Theta + PLBLA_mean_Delta,data=nesting.info,correlation = nlme::corARMA(c(0.7762,0.0972),form=~1|Day/Tone,p=1,q=1),method = "ML")
+
+nesting.info2 <- nesting.info
+nesting.info2$Day <- as.numeric(nesting.info2$Day)
+AIC_mod.gls.DayNum <- gls(as.formula(paste("probitPlatform~",paste(model_var_gls,collapse="+"))),data=nesting.info2,correlation = nlme::corARMA(c(0.7762,0.0972),form=~1|Day/Tone,p=1,q=1),method = "ML")
+summary(AIC_mod.gls)
+```
+
+Predictions
+```{r}
+pred.data <- as.data.frame(Test_Data.gls)
+pred.var <- names(AIC_mod.gls$coefficients)[-c(1:52)]
+pred.var <- c("Day","Tone","Bin",pred.var)
+pred.data <- pred.data[,pred.var]
+pred.data$Day <- pred.data$Day
+pred.data$Tone <- as.factor(pred.data$Tone)
+pred.data$Bin <- as.factor(pred.data$Bin)
+pred.gls.mod <- predict(AIC_mod.gls.DayPoly,newdata = pred.data,na.action = NULL)
+sum((as.numeric(Test_Data[,37]) - pred.gls.mod)^2)
+```
+
+Diagnostic Plots
+```{r}
+par(mfrow = c(1,2))
+plot(AIC_mod.gls$fitted,AIC_mod.gls$residuals)
+qqnorm(AIC_mod.gls$residuals)
+abline(0,1)
+```
+
+
+Anova Test
+```{r}
+anova(AIC_mod.gls)
+```
+
+Comparison to TS
+```{r}
+plot(pred.gls.mod)
+points(Test_Data.gls$probitPlatform,col = "red")
+points(1:600,TS_predict_Day[["pred"]], col = "yellow")
+```
+

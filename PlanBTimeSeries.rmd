@@ -1,0 +1,219 @@
+---
+title: "Testing Model Format"
+author: "Lukas"
+date: "2023-01-30"
+output: html_document
+---
+
+Note: First two tones of August 8th (day 2) are bad
+
+Packages
+```{r}
+library(lme4)
+library(VGAM)
+library(car)
+library(tseries)
+library(forecast)
+library(TSA)
+library(doParallel)
+library(parallel)
+library(foreach)
+```
+
+
+Load MATLAB Data
+```{r}
+Aug_08 <- read.csv("C:\\Users\\buhl5\\Desktop\\Plan B Files\\PMA17\\Aug_08_table.csv")
+Aug_09 <- read.csv("C:\\Users\\buhl5\\Desktop\\Plan B Files\\PMA17\\Aug_09_table.csv")
+Aug_12 <- read.csv("C:\\Users\\buhl5\\Desktop\\Plan B Files\\PMA17\\Aug_12_table.csv")
+Aug_15 <- read.csv("C:\\Users\\buhl5\\Desktop\\Plan B Files\\PMA17\\Aug_15_table.csv")
+Oct_12 <- read.csv("C:\\Users\\buhl5\\Desktop\\Plan B Files\\PMA17\\Oct_12_table.csv")
+```
+
+Remove Bad Tones from August 8th
+
+```{r}
+Aug_08 <- Aug_08[-c(1:60),]
+```
+
+Relabel Days
+```{r}
+Aug_08$Day <- 1
+Aug_09$Day <- 2
+Aug_12$Day <- 3
+Aug_15$Day <- 4
+Oct_12$Day <- 5
+```
+
+
+
+Day will likely be more useful when the days are all ran together with no gaps
+
+Full Ephys Dataset
+```{r}
+Data <- rbind(Aug_08,Aug_09,Aug_12,Aug_15)
+Test_Data <- Oct_12
+rm(Aug_08,Aug_09,Aug_12,Aug_15,Oct_12)
+```
+
+
+Factors
+```{r}
+Data$Day <- as.factor(Data$Day)
+Data$Tone <- as.factor(Data$Tone)
+Data$Bin <- as.factor(Data$Bin)
+```
+
+
+Load Behavior Data
+```{r}
+## I Need to run August 5th through Analysis
+Aug_08_Behav <- read.csv("C:\\Users\\buhl5\\Downloads\\08_08_new_R_TB_PMA17.csv")
+Aug_09_Behav <- read.csv("C:\\Users\\buhl5\\Downloads\\08_09_new_R_TB_PMA17.csv")
+Aug_12_Behav <- read.csv("C:\\Users\\buhl5\\Downloads\\08_12_new_R_TB_PMA17.csv")
+Aug_15_Behav <- read.csv("C:\\Users\\buhl5\\Downloads\\08_15_new_R_TB_PMA17.csv")
+Oct_12_Behav <- read.csv("C:\\Users\\buhl5\\Downloads\\10_12_new_R_TB_PMA17.csv")
+```
+
+Pull Time Specific Bins currently time 0 to 29. Will likely be adjusted to only tones
+
+```{r}
+Aug_08_Behav_p  <-  Aug_08_Behav[Aug_08_Behav[,2] %in% c(0:29),3]
+Aug_09_Behav_p  <-  Aug_09_Behav[Aug_09_Behav[,2] %in% c(0:29),3]
+Aug_12_Behav_p  <-  Aug_12_Behav[Aug_12_Behav[,2] %in% c(0:29),3]
+Aug_15_Behav_p  <-  Aug_15_Behav[Aug_15_Behav[,2] %in% c(0:29),3]
+Oct_12_Behav_p  <-  Oct_12_Behav[Oct_12_Behav[,2] %in% c(0:29),3]
+```
+
+All Behave
+
+```{r}
+#Remove same August Stuff
+Aug_08_Behav_p <- Aug_08_Behav_p[-c(1:60)]
+Behave <- c(Aug_08_Behav_p,Aug_09_Behav_p,Aug_12_Behav_p,Aug_15_Behav_p)
+
+Test_Data$Platform <- Oct_12_Behav_p
+Data$Platform <- Behave
+```
+
+
+Clean
+```{r}
+rm(Aug_08_Behav,Aug_09_Behav,Aug_12_Behav,Aug_15_Behav,Oct_12_Behav)
+rm(Aug_08_Behav_p,Aug_09_Behav_p,Aug_12_Behav_p,Aug_15_Behav_p,Oct_12_Behav_p,Behave)
+```
+
+Data needs to be adjusted to accommodate 0 and 1
+
+```{r}
+#Playing it safe using a loop
+
+offset <- 0.02
+
+
+for(i in 1:length(Data$Platform)){
+  
+  if(Data$Platform[i] == 0){Data$Platform[i] <- offset}
+  if(Data$Platform[i] == 1){Data$Platform[i] <- 1 - offset}
+}
+
+for(i in 1:length(Test_Data$Platform)){
+  
+  if(Test_Data$Platform[i] == 0){Test_Data$Platform[i] <- offset}
+  if(Test_Data$Platform[i] == 1){Test_Data$Platform[i] <- 1 - offset}
+}
+```
+
+Transform Response to make it fit regression requirement
+```{r}
+Data$probitPlatform <- probitlink(Data$Platform)
+Test_Data$probitPlatform <- probitlink(Test_Data$Platform)
+```
+
+
+
+Is it autoregressive or moving average?
+
+```{r}
+plot(ts(Data$probitPlatform))
+```
+
+
+```{r}
+pdf(file = "C:\\Users\\buhl5\\Desktop\\Plot PDFs\\TS_ACF.pdf",
+    width = 5,
+    height =3)
+acf(ts(Data$probitPlatform),main="Autocorrelation of Probit Platform Time")
+dev.off()
+```
+
+```{r}
+pdf(file = "C:\\Users\\buhl5\\Desktop\\Plot PDFs\\TS_PACF.pdf",
+    width = 5,
+    height =3)
+pacf(ts(Data$probitPlatform),main="Partial Autocorrelation of Probit Platform Time")
+dev.off()
+```
+Suggests P should be 4 since it is the last significant lag before most remaining become not significant.
+
+
+
+
+
+ADF test
+```{r}
+adf.test(Datats, alternative="stationary", k=0)
+adf.test(Datats, alternative="stationary")
+tseries::pp.test(Datats,alternative = "stationary",type = "Z(t_alpha)",lshort = F)
+```
+
+Lagged Differences
+```{r}
+acf(diff(Data$probitPlatform),main="Autocorrelation of Lagged Differences of Platform Time")
+```
+
+1,2,3,4,12,20,30 all appear significant especially 2,3,30
+
+
+```{r}
+Datats <- ts(Data$probitPlatform,frequency = 30,start = c(1,1))
+```
+
+Auto ARIMA for p,d,q
+
+Previous graphs suggest that p is approximately 1-5 and q could be up to 30
+
+```{r}
+start <- Sys.time()
+start
+
+auto <- auto.arima(Datats, stationary = T,  seasonal = T, stepwise = T,ic = "aic",max.p = 4, max.q = 8, max.P = 3, max.Q = 3, max.order = 50,trace = T, test = "adf",approximation = T)
+summary(auto)
+
+end <- Sys.time()
+end-start
+```
+
+Auto ARIMA suggests ARIMA (1,0,2)(2,0,0)[30] AIC 6667.31
+
+Model Fit
+```{r}
+time.series.fit <- arima(Datats,order=c(1,0,2),
+                 seasonal=list(order=c(2,0,0),period=30))
+```
+
+
+```{r}
+plot(rstandard(time.series.fit))
+hist(rstandard(time.series.fit))
+qqnorm(rstandard(time.series.fit))
+abline(0,1)
+acf(time.series.fit$residuals)
+tseries::adf.test(time.series.fit$residuals, alternative="stationary", k=0)
+tseries::adf.test(time.series.fit$residuals, alternative="stationary")
+car::dwt(as.numeric(time.series.fit$residuals),max.lag = 30)
+(DWT = car::dwt(as.numeric(time.series.fit$residuals),max.lag = 30))
+DWT.r <- as.data.frame(cbind(Lag = c(1:30), DWT = DWT))
+```
+
+
